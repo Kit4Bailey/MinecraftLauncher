@@ -770,7 +770,7 @@ function App() {
       const url = `https://api.modrinth.com/v2/search?query=${encodeURIComponent(queryStr)}&facets=${encodeURIComponent(facets)}&limit=20`;
       const res = await fetch(url, {
         headers: {
-          "User-Agent": "dev.nox.minecraftlauncher/0.1.0 (noxlauncher@nox.dev)"
+          "User-Agent": "dev.rift.minecraftlauncher/0.1.0 (riftlauncher@nox.dev)"
         }
       });
       const data = await res.json();
@@ -793,7 +793,7 @@ function App() {
       const url = `https://api.modrinth.com/v2/project/${mod.project_id}/version`;
       const res = await fetch(url, {
         headers: {
-          "User-Agent": "dev.nox.minecraftlauncher/0.1.0 (noxlauncher@nox.dev)"
+          "User-Agent": "dev.rift.minecraftlauncher/0.1.0 (riftlauncher@nox.dev)"
         }
       });
       const versions = await res.json();
@@ -900,7 +900,7 @@ function App() {
         <aside className="sidebar glass-panel">
           <div className="logo-container">
             <Gamepad2 className="logo-icon" />
-            <span className="logo-text">NoxLauncher</span>
+            <span className="logo-text">Rift Launcher</span>
           </div>
 
           <nav className="nav-links">
@@ -1618,7 +1618,7 @@ function App() {
               <div className="placeholder-view">
                 <Compass size={48} className="placeholder-icon" />
                 <h2>Discover Modpacks</h2>
-                <p>Explore curated modpacks and maps directly inside NoxLauncher. (Coming soon)</p>
+                <p>Explore curated modpacks and maps directly inside Rift Launcher. (Coming soon)</p>
               </div>
             )}
 

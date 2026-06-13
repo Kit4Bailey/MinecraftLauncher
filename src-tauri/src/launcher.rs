@@ -124,7 +124,7 @@ fn get_data_dir() -> PathBuf {
     } else {
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     };
-    path.push(".noxlauncher");
+    path.push(".riftlauncher");
     if !path.exists() {
         fs::create_dir_all(&path).unwrap();
     }

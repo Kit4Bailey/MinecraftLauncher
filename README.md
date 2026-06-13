@@ -1,6 +1,6 @@
-# NoxLauncher
+# Rift Launcher
 
-NoxLauncher is a sleek, lightweight, offline (cracked) Minecraft launcher built on a high-performance **Tauri (Rust)** backend and a responsive **React + TypeScript** frontend. 
+Rift Launcher is a sleek, lightweight, offline (cracked) Minecraft launcher built on a high-performance **Tauri (Rust)** backend and a responsive **React + TypeScript** frontend. 
 
 It is designed with rich, modern, and minimal OLED-black aesthetics, featuring native window control integrations, isolated game directories, custom skins, mod loader setups, Modrinth search capabilities, and a real-time console log viewer.
 
@@ -23,7 +23,7 @@ It is designed with rich, modern, and minimal OLED-black aesthetics, featuring n
 
 ### Prerequisites
 
-To compile and run NoxLauncher, you need:
+To compile and run Rift Launcher, you need:
 
 1. **Rust:** Install via [rustup](https://rustup.rs/)
 2. **Node.js & npm:** Install from [nodejs.org](https://nodejs.org/)
@@ -63,16 +63,16 @@ This will output an optimized installer/binary under the `src-tauri/target/relea
 
 ## 📂 Directory Structure
 
-NoxLauncher isolates all files under your home directory to prevent conflicts with official Minecraft launchers:
+Rift Launcher isolates all files under your home directory to prevent conflicts with official Minecraft launchers:
 
-- **Config & Logs:** `~/.noxlauncher/`
-  - **Instances:** `~/.noxlauncher/instances/<instance_name>/` (Holds mods, saves, options, resource packs)
-  - **Skins:** `~/.noxlauncher/skins/<username>/`
-  - **Custom Themes:** `~/.noxlauncher/themes/`
-  - **Minecraft Assets & Libraries:** Shared under `~/.noxlauncher/assets/` and `~/.noxlauncher/libraries/`
+- **Config & Logs:** `~/.riftlauncher/`
+  - **Instances:** `~/.riftlauncher/instances/<instance_name>/` (Holds mods, saves, options, resource packs)
+  - **Skins:** `~/.riftlauncher/skins/<username>/`
+  - **Custom Themes:** `~/.riftlauncher/themes/`
+  - **Minecraft Assets & Libraries:** Shared under `~/.riftlauncher/assets/` and `~/.riftlauncher/libraries/`
 
 ---
 
 ## ⚖️ Legal & Disclaimer
 
-NoxLauncher is an offline (cracked) client developed for educational purposes, mod testing, and offline play. If you enjoy Minecraft, please support the developers by purchasing an official account at [minecraft.net](https://www.minecraft.net/).
+Rift Launcher is an offline (cracked) client developed for educational purposes, mod testing, and offline play. If you enjoy Minecraft, please support the developers by purchasing an official account at [minecraft.net](https://www.minecraft.net/).
