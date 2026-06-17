@@ -20,9 +20,66 @@ import {
   FolderOpen,
   User,
   AlertTriangle,
-  Terminal
+  Terminal,
+  Search,
+  Download,
+  Star,
+  Image as ImageIcon,
+  Upload
 } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
+
+const appWindow = getCurrentWindow();
+
+function RiftLogo({ size = 24, className = "" }: { size?: number, className?: string }) {
+  return (
+    <svg 
+      width={size} 
+      height={size} 
+      viewBox="0 0 64 64" 
+      fill="none" 
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      style={{ overflow: 'visible' }}
+    >
+      <path d="M32 6L58 19L32 32L6 19L32 6Z" fill="url(#cube-top)" />
+      <path d="M6 19L32 32V58L6 45V19Z" fill="url(#cube-left)" />
+      <path d="M32 32L58 19V45L32 58V32Z" fill="url(#cube-right)" />
+      <path 
+        d="M32 6L32 58" 
+        stroke="var(--accent)" 
+        strokeWidth="4" 
+        strokeLinecap="round" 
+        filter="url(#glow)" 
+      />
+      <path 
+        d="M32 6L32 58" 
+        stroke="#ffffff" 
+        strokeWidth="1.5" 
+        strokeLinecap="round" 
+      />
+      <defs>
+        <linearGradient id="cube-top" x1="32" y1="6" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.4" />
+          <stop offset="100%" stopColor="var(--panel-bg)" stopOpacity="0.8" />
+        </linearGradient>
+        <linearGradient id="cube-left" x1="6" y1="38.5" x2="32" y2="38.5" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#1e293b" />
+          <stop offset="100%" stopColor="#0f172a" />
+        </linearGradient>
+        <linearGradient id="cube-right" x1="32" y1="38.5" x2="58" y2="38.5" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#0f172a" />
+          <stop offset="100%" stopColor="#1e293b" />
+        </linearGradient>
+        <filter id="glow" x="-8" y="-8" width="80" height="80" filterUnits="userSpaceOnUse">
+          <feGaussianBlur stdDeviation="3" result="blur" />
+          <feComposite in="SourceGraphic" in2="blur" operator="over" />
+        </filter>
+      </defs>
+    </svg>
+  );
+}
 
 
 
@@ -334,6 +391,21 @@ function App() {
   const [installingModId, setInstallingModId] = useState<string | null>(null);
   const [installedModIds, setInstalledModIds] = useState<string[]>([]);
 
+  // Discover Modpacks States
+  const [discoverModpacks, setDiscoverModpacks] = useState<any[]>([]);
+  const [isDiscoverLoading, setIsDiscoverLoading] = useState(false);
+  const [discoverQuery, setDiscoverQuery] = useState("");
+  const [installingModpackName, setInstallingModpackName] = useState<string | null>(null);
+  const [installProgress, setInstallProgress] = useState<string>("");
+
+  // Play Background States
+  const [playBgType, setPlayBgType] = useState<"none" | "panorama" | "custom">(
+    () => (localStorage.getItem("rift_play_bg_type") as any) || "panorama"
+  );
+  const [customBgData, setCustomBgData] = useState<string>(
+    () => localStorage.getItem("rift_custom_bg") || ""
+  );
+
   const applyTheme = (theme: Theme) => {
     const root = document.documentElement;
     Object.entries(theme.variables).forEach(([key, val]) => {
@@ -413,10 +485,15 @@ function App() {
       });
     });
 
+    const unlistenInstall = listen<string>("modpack-install-status", (event) => {
+      setInstallProgress(event.payload);
+    });
+
     return () => {
       unlistenStart.then(f => f());
       unlistenClose.then(f => f());
       unlistenLog.then(f => f());
+      unlistenInstall.then(f => f());
     };
   }, []);
 
@@ -450,6 +527,116 @@ function App() {
       logsTerminalRef.current.scrollTop = logsTerminalRef.current.scrollHeight;
     }
   }, [logsText, activeTab]);
+
+  const fetchDiscoverModpacks = async (queryStr: string = "") => {
+    setIsDiscoverLoading(true);
+    try {
+      const facets = `[["project_type:modpack"]]`;
+      const url = `https://api.modrinth.com/v2/search?query=${encodeURIComponent(queryStr)}&facets=${encodeURIComponent(facets)}&limit=16&index=relevance`;
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "dev.rift.minecraftlauncher/0.1.0 (riftlauncher@nox.dev)"
+        }
+      });
+      const data = await res.json();
+      setDiscoverModpacks(data.hits || []);
+    } catch (err) {
+      console.error("Modrinth modpack search failed:", err);
+    } finally {
+      setIsDiscoverLoading(false);
+    }
+  };
+
+  const handleInstallModpack = async (pack: any) => {
+    if (installingModpackName) return;
+
+    setInstallingModpackName(pack.title);
+    setInstallProgress("Fetching modpack version information...");
+
+    try {
+      const response = await fetch(`https://api.modrinth.com/v2/project/${pack.project_id}/version`, {
+        headers: {
+          "User-Agent": "dev.rift.minecraftlauncher/0.1.0 (riftlauncher@nox.dev)"
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch version list from Modrinth (status: ${response.status})`);
+      }
+      const versions = await response.json();
+      if (!versions || versions.length === 0) {
+        throw new Error("No versions found for this modpack on Modrinth.");
+      }
+
+      let mrpackUrl = "";
+      for (const ver of versions) {
+        const fileObj = ver.files?.find((f: any) => f.filename?.endsWith(".mrpack") || f.primary);
+        if (fileObj && fileObj.url) {
+          mrpackUrl = fileObj.url;
+          break;
+        }
+      }
+
+      if (!mrpackUrl) {
+        for (const ver of versions) {
+          const fileObj = ver.files?.find((f: any) => f.filename?.endsWith(".mrpack"));
+          if (fileObj && fileObj.url) {
+            mrpackUrl = fileObj.url;
+            break;
+          }
+        }
+      }
+
+      if (!mrpackUrl) {
+        throw new Error("Could not find a valid .mrpack file download for this modpack.");
+      }
+
+      setInstallProgress("Starting download...");
+
+      await invoke("install_modpack", {
+        url: mrpackUrl,
+        modpackName: pack.title
+      });
+
+      const updatedInstances = await invoke<Instance[]>("get_instances");
+      setInstances(updatedInstances);
+
+      alert(`Successfully installed modpack: ${pack.title}!`);
+    } catch (err: any) {
+      console.error(err);
+      alert(`Installation failed: ${err.message || err}`);
+    } finally {
+      setInstallingModpackName(null);
+      setInstallProgress("");
+    }
+  };
+
+  const handleBgTypeChange = (type: "none" | "panorama" | "custom") => {
+    setPlayBgType(type);
+    localStorage.setItem("rift_play_bg_type", type);
+  };
+
+  const handleCustomBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        if (base64) {
+          setCustomBgData(base64);
+          localStorage.setItem("rift_custom_bg", base64);
+          setPlayBgType("custom");
+          localStorage.setItem("rift_play_bg_type", "custom");
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'discover' && discoverModpacks.length === 0) {
+      fetchDiscoverModpacks();
+    }
+  }, [activeTab]);
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -895,11 +1082,29 @@ function App() {
 
   return (
     <div className="app-container">
+      <div className="title-bar" data-tauri-drag-region>
+        <div className="title-bar-left">
+          <RiftLogo size={16} className="title-bar-icon" />
+          <span>Rift Launcher</span>
+        </div>
+        <div className="title-bar-drag-area" data-tauri-drag-region />
+        <div className="title-bar-right">
+          <button className="title-btn" onClick={() => appWindow.minimize()}>
+            <svg width="10" height="10" viewBox="0 0 10 10"><rect fill="currentColor" x="0" y="5" width="10" height="1"/></svg>
+          </button>
+          <button className="title-btn" onClick={() => appWindow.toggleMaximize()}>
+            <svg width="10" height="10" viewBox="0 0 10 10"><path fill="none" stroke="currentColor" d="M1,1 L9,1 L9,9 L1,9 Z"/></svg>
+          </button>
+          <button className="title-btn close-btn" onClick={() => appWindow.close()}>
+            <svg width="10" height="10" viewBox="0 0 10 10"><path fill="none" stroke="currentColor" strokeWidth="1.2" d="M1,1 L9,9 M9,1 L1,9"/></svg>
+          </button>
+        </div>
+      </div>
       <div className="app-body">
         {/* Sidebar Navigation */}
         <aside className="sidebar glass-panel">
           <div className="logo-container">
-            <Gamepad2 className="logo-icon" />
+            <RiftLogo size={24} className="logo-icon" />
             <span className="logo-text">Rift Launcher</span>
           </div>
 
@@ -1093,7 +1298,16 @@ function App() {
           <div className="view-container">
             {activeTab === 'play' && (
               <>
-                <div className="welcome-section">
+                {(playBgType === 'panorama' || (playBgType === 'custom' && customBgData)) && (
+                  <div className="play-bg-container">
+                    <img 
+                      src={playBgType === 'panorama' ? '/panorama.jpg' : customBgData} 
+                      alt="Background" 
+                      className="play-bg-image animate" 
+                    />
+                  </div>
+                )}
+                <div className="welcome-section" style={{ position: 'relative', zIndex: 2 }}>
                   <span className="badge">{currentInstance ? `Minecraft ${currentInstance.version}` : 'No Instance'}</span>
                   <h1 className="welcome-title">
                     {currentInstance ? currentInstance.name : 'Create an Instance'}
@@ -1108,7 +1322,7 @@ function App() {
                   )}
                 </div>
 
-                <div className="play-section">
+                <div className="play-section" style={{ position: 'relative', zIndex: 2 }}>
                   <div className="version-selector">
                     <span className="version-label">Current Instance</span>
                     <div className="version-dropdown-container">
@@ -1615,10 +1829,81 @@ function App() {
             )}
 
             {activeTab === 'discover' && (
-              <div className="placeholder-view">
-                <Compass size={48} className="placeholder-icon" />
-                <h2>Discover Modpacks</h2>
-                <p>Explore curated modpacks and maps directly inside Rift Launcher. (Coming soon)</p>
+              <div className="discover-view">
+                <div className="discover-header">
+                  <h2 className="view-title">Discover Modpacks</h2>
+                  <p className="view-subtitle">Explore popular modpacks from Modrinth.</p>
+                </div>
+                
+                <div className="discover-search-bar">
+                  <div className="search-input-wrapper">
+                    <Search className="search-icon" size={18} />
+                    <input 
+                      type="text" 
+                      placeholder="Search for modpacks..." 
+                      value={discoverQuery}
+                      onChange={(e) => setDiscoverQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && fetchDiscoverModpacks(discoverQuery)}
+                      className="search-input"
+                    />
+                  </div>
+                  <button 
+                    className="search-btn" 
+                    onClick={() => fetchDiscoverModpacks(discoverQuery)}
+                    disabled={isDiscoverLoading}
+                  >
+                    Search
+                  </button>
+                </div>
+
+                <div className="discover-content">
+                  {isDiscoverLoading ? (
+                    <div className="loading-state">
+                      <RefreshCw className="loading-spinner" size={32} />
+                      <p>Loading Modpacks...</p>
+                    </div>
+                  ) : discoverModpacks.length > 0 ? (
+                    <div className="modpack-grid">
+                      {discoverModpacks.map((pack) => (
+                        <div key={pack.project_id} className="modpack-card glass-panel">
+                          <div className="modpack-image-container">
+                            {pack.icon_url ? (
+                              <img src={pack.icon_url} alt={pack.title} className="modpack-image" />
+                            ) : (
+                              <div className="modpack-image-placeholder">
+                                <Compass size={40} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="modpack-details">
+                            <h3 className="modpack-title">{pack.title}</h3>
+                            <p className="modpack-author">by {pack.author}</p>
+                            <p className="modpack-description">{pack.description}</p>
+                            
+                            <div className="modpack-stats">
+                              <span className="stat"><Download size={14} /> {pack.downloads.toLocaleString()}</span>
+                              <span className="stat"><Star size={14} /> {pack.follows}</span>
+                            </div>
+                            
+                            <button 
+                              className="modpack-install-btn"
+                              onClick={() => handleInstallModpack(pack)}
+                              disabled={installingModpackName !== null}
+                            >
+                              <Download size={16} />
+                              {installingModpackName === pack.title ? "Installing..." : "Install"}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-state">
+                      <Compass size={48} className="empty-icon" />
+                      <p>No modpacks found. Try a different search.</p>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -2026,6 +2311,59 @@ function App() {
 
 
 
+                  <div className="settings-section">
+                    <h3 className="section-title">Play Screen Background</h3>
+                    <div className="memory-controls" style={{ gap: '16px' }}>
+                      <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
+                        <button
+                          type="button"
+                          className={`theme-card ${playBgType === 'none' ? 'active' : ''}`}
+                          style={{ flex: 1, padding: '12px' }}
+                          onClick={() => handleBgTypeChange('none')}
+                        >
+                          <span className="theme-card-name">Theme Default</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`theme-card ${playBgType === 'panorama' ? 'active' : ''}`}
+                          style={{ flex: 1, padding: '12px' }}
+                          onClick={() => handleBgTypeChange('panorama')}
+                        >
+                          <span className="theme-card-name">Minecraft Panorama</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`theme-card ${playBgType === 'custom' ? 'active' : ''}`}
+                          style={{ flex: 1, padding: '12px' }}
+                          onClick={() => handleBgTypeChange('custom')}
+                        >
+                          <span className="theme-card-name">Custom Image</span>
+                        </button>
+                      </div>
+
+                      {playBgType === 'custom' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%', marginTop: '8px' }}>
+                          <label className="theme-action-btn secondary" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', width: '100%', padding: '10px' }}>
+                            <Upload size={14} />
+                            Upload Custom Background
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              onChange={handleCustomBgUpload} 
+                              style={{ display: 'none' }} 
+                            />
+                          </label>
+                          {customBgData && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-muted)', justifyContent: 'center' }}>
+                              <ImageIcon size={14} />
+                              Custom background image loaded
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                   <button type="submit" className="save-settings-btn">
                     Save Configurations
                   </button>
@@ -2083,6 +2421,36 @@ function App() {
           </div>
         </div>
       )}
+
+      {installingModpackName && (
+        <div className="modal-overlay">
+          <div className="error-modal glass-panel" style={{ maxWidth: '500px' }}>
+            <div className="error-modal-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)', paddingBottom: '12px' }}>
+              <Download size={24} style={{ color: 'var(--accent)' }} />
+              <h3>Installing Modpack</h3>
+            </div>
+            
+            <div className="error-modal-body" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', padding: '24px 0' }}>
+              <p style={{ fontSize: '1.1rem', fontWeight: 600 }}>{installingModpackName}</p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', width: '100%' }}>
+                <RefreshCw className="loading-spinner" size={40} style={{ color: 'var(--accent)' }} />
+                <p style={{ color: '#aaa', fontSize: '0.9rem', textAlign: 'center' }}>{installProgress || "Preparing installation..."}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Frameless window resize handles */}
+      <div className="resize-handle n" onMouseDown={() => appWindow.startResizeDragging('North')} />
+      <div className="resize-handle s" onMouseDown={() => appWindow.startResizeDragging('South')} />
+      <div className="resize-handle e" onMouseDown={() => appWindow.startResizeDragging('East')} />
+      <div className="resize-handle w" onMouseDown={() => appWindow.startResizeDragging('West')} />
+      <div className="resize-handle nw" onMouseDown={() => appWindow.startResizeDragging('NorthWest')} />
+      <div className="resize-handle ne" onMouseDown={() => appWindow.startResizeDragging('NorthEast')} />
+      <div className="resize-handle sw" onMouseDown={() => appWindow.startResizeDragging('SouthWest')} />
+      <div className="resize-handle se" onMouseDown={() => appWindow.startResizeDragging('SouthEast')} />
     </div>
   );
 }

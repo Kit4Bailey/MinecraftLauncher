@@ -15,7 +15,7 @@
         "title": "Rift Launcher",
         "width": 1024,
         "height": 700,
-        "decorations": true,
+        "decorations": false,
         "resizable": true,
         "minWidth": 800,
         "minHeight": 500

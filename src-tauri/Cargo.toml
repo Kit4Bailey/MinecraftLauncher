@@ -27,4 +27,6 @@ tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "process"
 md5 = "0.8.0"
 futures = "0.3.32"
 base64 = "0.22.1"
+zip = "8.6.0"
+tempfile = "3.27.0"
 

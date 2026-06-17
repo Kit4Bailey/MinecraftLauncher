@@ -546,6 +546,58 @@ async fn get_themes() -> Result<Vec<Theme>, String> {
                 ("--accent-hover", "#eb6f92"),
             ].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
         },
+        Theme {
+            name: "Crimson Blood".to_string(),
+            is_custom: false,
+            variables: vec![
+                ("--bg-color", "#1a0505"),
+                ("--panel-bg", "#2a0a0a"),
+                ("--panel-border", "#4a1111"),
+                ("--text-main", "#ffeeee"),
+                ("--text-muted", "#d0a0a0"),
+                ("--accent", "#e63946"),
+                ("--accent-hover", "#d62828"),
+            ].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        },
+        Theme {
+            name: "Cyberpunk Neon".to_string(),
+            is_custom: false,
+            variables: vec![
+                ("--bg-color", "#0b0014"),
+                ("--panel-bg", "#17002b"),
+                ("--panel-border", "#3c096c"),
+                ("--text-main", "#e0aaff"),
+                ("--text-muted", "#c77dff"),
+                ("--accent", "#ff006e"),
+                ("--accent-hover", "#fb5607"),
+            ].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        },
+        Theme {
+            name: "Sunset Orange".to_string(),
+            is_custom: false,
+            variables: vec![
+                ("--bg-color", "#1c0d02"),
+                ("--panel-bg", "#2c1404"),
+                ("--panel-border", "#4a250b"),
+                ("--text-main", "#ffecd6"),
+                ("--text-muted", "#e3bfa1"),
+                ("--accent", "#f77f00"),
+                ("--accent-hover", "#d62828"),
+            ].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        },
+        Theme {
+            name: "Abyssal Blue".to_string(),
+            is_custom: false,
+            variables: vec![
+                ("--bg-color", "#000b18"),
+                ("--panel-bg", "#00152e"),
+                ("--panel-border", "#002855"),
+                ("--text-main", "#e0f2fe"),
+                ("--text-muted", "#bae6fd"),
+                ("--accent", "#0284c7"),
+                ("--accent-hover", "#0369a1"),
+            ].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        },
     ];
 
     if themes_dir.exists() {
@@ -866,6 +918,251 @@ async fn read_instance_log(instance_name: String) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| format!("Failed to read log file: {}", e))
 }
 
+#[derive(Deserialize)]
+struct ModrinthEnv {
+    client: Option<String>,
+    #[allow(dead_code)]
+    server: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ModrinthFile {
+    path: String,
+    downloads: Vec<String>,
+    #[serde(default)]
+    env: Option<ModrinthEnv>,
+}
+
+#[derive(Deserialize)]
+struct ModrinthIndex {
+    #[allow(dead_code)]
+    name: String,
+    dependencies: HashMap<String, String>,
+    files: Vec<ModrinthFile>,
+}
+
+fn sanitize_instance_name(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_alphanumeric() || c == ' ' || c == '_' || c == '-' { c } else { '_' })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+async fn download_pack_file(
+    client: reqwest::Client,
+    urls: Vec<String>,
+    target_path: PathBuf,
+) -> Result<(), String> {
+    let mut last_err = "No download URLs provided".to_string();
+    for url in urls {
+        match client.get(&url).send().await {
+            Ok(res) => {
+                match res.bytes().await {
+                    Ok(bytes) => {
+                        if let Some(parent) = target_path.parent() {
+                            if let Err(e) = fs::create_dir_all(parent) {
+                                return Err(format!("Failed to create directories: {}", e));
+                            }
+                        }
+                        if let Err(e) = fs::write(&target_path, bytes) {
+                            return Err(format!("Failed to write file: {}", e));
+                        }
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        last_err = format!("Failed to read bytes: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                last_err = format!("Failed to fetch: {}", e);
+            }
+        }
+    }
+    Err(last_err)
+}
+
+#[tauri::command]
+async fn install_modpack(
+    app: tauri::AppHandle,
+    url: String,
+    modpack_name: String,
+) -> Result<(), String> {
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
+    use tauri::Emitter;
+
+    let _ = app.emit("modpack-install-status", "Downloading modpack archive...".to_string());
+
+    let client = reqwest::Client::new();
+    let res = client.get(&url).send().await.map_err(|e| format!("Failed to download modpack: {}", e))?;
+    let bytes = res.bytes().await.map_err(|e| format!("Failed to read modpack bytes: {}", e))?;
+
+    let _ = app.emit("modpack-install-status", "Extracting modpack index...".to_string());
+    let reader = std::io::Cursor::new(bytes.to_vec());
+    let mut archive = zip::ZipArchive::new(reader).map_err(|e| format!("Failed to parse zip archive: {}", e))?;
+
+    let index_file_content = {
+        let mut index_file = archive.by_name("modrinth.index.json")
+            .map_err(|_| "Could not find modrinth.index.json in the modpack zip".to_string())?;
+        let mut content = String::new();
+        use std::io::Read;
+        index_file.read_to_string(&mut content).map_err(|e| format!("Failed to read modrinth.index.json: {}", e))?;
+        content
+    };
+
+    let index: ModrinthIndex = serde_json::from_str(&index_file_content)
+        .map_err(|e| format!("Failed to parse modrinth.index.json: {}", e))?;
+
+    let mc_version = index.dependencies.get("minecraft")
+        .ok_or_else(|| "Modpack is missing 'minecraft' dependency".to_string())?
+        .clone();
+
+    let mut loader = None;
+    let mut loader_version = None;
+
+    if let Some(v) = index.dependencies.get("fabric-loader") {
+        loader = Some("fabric".to_string());
+        loader_version = Some(v.clone());
+    } else if let Some(v) = index.dependencies.get("quilt-loader") {
+        loader = Some("quilt".to_string());
+        loader_version = Some(v.clone());
+    } else if let Some(v) = index.dependencies.get("forge") {
+        loader = Some("forge".to_string());
+        loader_version = Some(v.clone());
+    } else if let Some(v) = index.dependencies.get("neoforge") {
+        loader = Some("neoforge".to_string());
+        loader_version = Some(v.clone());
+    } else if let Some(v) = index.dependencies.get("neo-forge") {
+        loader = Some("neoforge".to_string());
+        loader_version = Some(v.clone());
+    }
+
+    let sanitized_name = sanitize_instance_name(&modpack_name);
+    let mut final_name = sanitized_name.clone();
+    let mut counter = 1;
+
+    let mut data_dir = get_data_dir();
+    data_dir.push("instances.json");
+
+    let mut instances: Vec<Instance> = if data_dir.exists() {
+        let content = fs::read_to_string(&data_dir).unwrap_or_else(|_| "[]".to_string());
+        serde_json::from_str(&content).unwrap_or_else(|_| vec![])
+    } else {
+        vec![]
+    };
+
+    while instances.iter().any(|i| i.name == final_name) {
+        final_name = format!("{} ({})", sanitized_name, counter);
+        counter += 1;
+    }
+
+    let _ = app.emit("modpack-install-status", format!("Creating instance: {}...", final_name));
+
+    let new_instance = Instance {
+        name: final_name.clone(),
+        version: mc_version.clone(),
+        settings: LauncherSettings::default(),
+        mod_loader: loader.clone(),
+        mod_loader_version: loader_version.clone(),
+    };
+
+    instances.push(new_instance);
+    let json = serde_json::to_string_pretty(&instances).map_err(|e| e.to_string())?;
+    fs::write(&data_dir, json).map_err(|e| e.to_string())?;
+
+    let mut instance_folder = get_data_dir();
+    instance_folder.push("instances");
+    instance_folder.push(&final_name);
+    fs::create_dir_all(&instance_folder).map_err(|e| e.to_string())?;
+
+    // Prepare files to download
+    let mut download_tasks = vec![];
+    for file in index.files {
+        if let Some(ref env) = file.env {
+            if let Some(ref client_env) = env.client {
+                if client_env == "unsupported" {
+                    continue;
+                }
+            }
+        }
+        let target_path = instance_folder.join(&file.path);
+        download_tasks.push((file.downloads.clone(), target_path));
+    }
+
+    let total_files = download_tasks.len();
+    if total_files > 0 {
+        let downloaded_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let semaphore = Arc::new(Semaphore::new(5));
+        let client_clone = client.clone();
+        let mut futures_vec = vec![];
+
+        for (urls, target_path) in download_tasks {
+            let sem = semaphore.clone();
+            let c = client_clone.clone();
+            let app_clone = app.clone();
+            let dc = downloaded_count.clone();
+
+            futures_vec.push(tokio::spawn(async move {
+                let _permit = sem.acquire().await.unwrap();
+                let res = download_pack_file(c, urls, target_path).await;
+                if res.is_ok() {
+                    let count = dc.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    let _ = app_clone.emit("modpack-install-status", format!("Downloading files ({}/{})", count, total_files));
+                }
+                res
+            }));
+        }
+
+        let results = futures::future::join_all(futures_vec).await;
+        for res in results {
+            match res {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return Err(format!("Failed to download pack file: {}", e)),
+                Err(e) => return Err(format!("Download task join error: {}", e)),
+            }
+        }
+    }
+
+    // Extract overrides
+    let _ = app.emit("modpack-install-status", "Extracting overrides...".to_string());
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| format!("Failed to read zip entry: {}", e))?;
+        let name = file.name().to_string();
+
+        let (prefix, is_override) = if name.starts_with("overrides/") {
+            ("overrides/", true)
+        } else if name.starts_with("client-overrides/") {
+            ("client-overrides/", true)
+        } else {
+            ("", false)
+        };
+
+        if is_override {
+            let relative_path = &name[prefix.len()..];
+            if relative_path.is_empty() {
+                continue;
+            }
+
+            let target_path = instance_folder.join(relative_path);
+
+            if file.is_dir() {
+                fs::create_dir_all(&target_path).map_err(|e| e.to_string())?;
+            } else {
+                if let Some(parent) = target_path.parent() {
+                    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                let mut outfile = fs::File::create(&target_path).map_err(|e| e.to_string())?;
+                std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    let _ = app.emit("modpack-install-status", "Installation completed!".to_string());
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -897,7 +1194,8 @@ pub fn run() {
             save_instance_loader,
             get_loader_versions,
             download_mod,
-            read_instance_log
+            read_instance_log,
+            install_modpack
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
